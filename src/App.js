@@ -1,75 +1,139 @@
-import React from "react";
+import React, { useEffect, useReducer, useState } from "react";
+import axios from "axios";
 
 const useSemiPersistentState = (key, initialValue) => {
-  const [value, setValue] = React.useState(
-    localStorage.getItem(key) || initialValue
-  );
+  const [value, setValue] = useState(localStorage.getItem(key) || initialValue);
 
-  React.useEffect(() => {
+  useEffect(() => {
     localStorage.setItem(key, value);
   }, [key, value]);
 
   return [value, setValue];
 };
 
+const storiesReducer = (state, action) => {
+  switch (action.type) {
+    case "STORIES_FETCH_INIT":
+      return {
+        ...state,
+        isLoading: true,
+        isError: false,
+      };
+    case "STORIES_FETCH_FAILURE":
+      return {
+        ...state,
+        isLoading: false,
+        isError: true,
+      };
+    case "STORIES_FETCH_SUCCESS":
+      return {
+        data: action.payload,
+        isLoading: false,
+        isError: false,
+      };
+    case "REMOVE_STORY":
+      return {
+        ...state,
+        data: state.filter(
+          (story) => action.payload.objectID !== story.objectID
+        ),
+      };
+    default:
+      throw new Error();
+  }
+};
+
+const API_ENDPOINT = "https://hn.algolia.com/api/v1/search?query=";
+
 const App = () => {
-  const stories = [
-    {
-      title: "React",
-      url: "https://reactjs.org",
-      author: "Jordan Walke",
-      num_comments: 3,
-      points: 4,
-      objectID: 0,
-    },
-    {
-      title: "Redux",
-      url: "https://redux.js.org",
-      author: "Dan Abramov, Andrew Clark",
-      num_comments: 2,
-      points: 5,
-      objectID: 1,
-    },
-  ];
-
   const [searchTerm, setSearchTerm] = useSemiPersistentState("search", "React");
+  const [url, setUrl] = useState(`${API_ENDPOINT}${searchTerm}`);
+  const [stories, dispatchStories] = useReducer(storiesReducer, {
+    data: [],
+    isLoading: false,
+    isError: false,
+  });
 
-  const handleSearch = (event) => {
+  useEffect(() => {
+    dispatchStories({ type: "STORIES_FETCH_INIT" });
+
+    axios
+      .get(url)
+      .then((result) => {
+        dispatchStories({
+          type: "STORIES_FETCH_SUCCESS",
+          payload: result.data.hits,
+        });
+      })
+      .catch(() => dispatchStories({ type: "STORIES_FETCH_FAILURE" }));
+  }, [url]);
+
+  const handleRemoveStory = (item) => {
+    dispatchStories({
+      type: "REMOVE_STORY",
+      payload: item,
+    });
+  };
+
+  const handleSearchInput = (event) => {
     setSearchTerm(event.target.value);
   };
 
-  const searchedStories = stories.filter((elem) =>
-    elem.title.includes(searchTerm)
-  );
+  const handleSearchSubmit = () => {
+    setUrl(`${API_ENDPOINT}${searchTerm}`);
+  };
 
   return (
     <div>
       <h1>My Hacker Stories</h1>
-      <Search search={searchTerm} onSearch={handleSearch} />
+      <InputWithLabel
+        id="search"
+        value={searchTerm}
+        onInputChange={handleSearchInput}
+      >
+        <strong>Search: </strong>
+      </InputWithLabel>
+      <button type="button" disabled={!searchTerm} onClick={handleSearchSubmit}>
+        Submit
+      </button>
+
       <hr />
-      <List list={searchedStories} />
+
+      {stories.isError && <p>Something went wrong !</p>}
+
+      {stories.isLoading ? (
+        <p>Loading ...</p>
+      ) : (
+        <List list={stories.data} onRemoveItem={handleRemoveStory} />
+      )}
     </div>
   );
 };
 
-const Search = ({ search, onSearch }) => {
+const InputWithLabel = ({
+  id,
+  value,
+  type = "text",
+  onInputChange,
+  children,
+}) => {
   return (
     <>
-      <label htmlFor="search">Search: </label>
-      <input id="search" type="text" value={search} onChange={onSearch} />
+      <label htmlFor={id}>{children}</label>
+      <input id={id} type={type} value={value} onChange={onInputChange} />
     </>
   );
 };
 
-const List = ({ list }) => (
+const List = ({ list, onRemoveItem }) => (
   <ul>
     {list.map((elem) => (
-      <Item key={elem.objectID} item={elem} />
+      <Item key={elem.objectID} item={elem} onRemoveItem={onRemoveItem} />
     ))}
   </ul>
 );
 
-const Item = ({ item }) => (
+const Item = ({ item, onRemoveItem }) => (
   <li>
     <span>
       <a href={item.url}>{item.title}</a>{" "}
@@ -77,6 +141,11 @@ const Item = ({ item }) => (
     <span>{item.author} </span>
     <span>{item.num_comments} </span>
     <span>{item.points}</span>
+    <span>
+      <button type="button" onClick={() => onRemoveItem(item)}>
+        Dismiss
+      </button>
+    </span>
   </li>
 );
 
